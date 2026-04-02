@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "WebFetch(domain:databento.com)",
+      "WebSearch",
+      "WebFetch(domain:quantpedia.com)",
+      "WebFetch(domain:blog.quantinsti.com)",
+      "Bash(ls:*)",
+      "Bash(uv add:*)"
+    ]
+  }
+}
