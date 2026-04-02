@@ -8,10 +8,11 @@ from pathlib import Path
 import pandas as pd
 
 from cta.data_loader import load_multiple
-from cta.signals import momentum, ma_crossover, combined_momentum
+from cta.signals import SIGNAL_REGISTRY, generate_signal
 from cta.position_sizing import volatility_sized_position
 from cta.backtest import run_backtest
 from cta.analysis import calc_metrics, print_metrics, plot_backtest, plot_monthly_returns
+from cta.risk import trailing_stop, vol_scale, vol_target_portfolio
 
 # ============================================================
 # 配置
@@ -32,33 +33,18 @@ CONFIG = {
     # 运行哪些品种（从 PRODUCTS 中选）
     "products": ["ES", "CL", "GC", "ZN"],
 
-    # 策略参数
+    # 策略参数（可用信号见 SIGNAL_REGISTRY）
     "signal_fn": "combined_momentum",
-    "momentum_lookback": 20,
-    "combined_lookbacks": [12, 30, 60],
-    "ma_fast": 10,
-    "ma_slow": 50,
 
     # 仓位管理
     "initial_capital": 1_000_000,
     "risk_fraction": 0.01,
     "atr_period": 20,
+
+    # 风控（设为 None 关闭）
+    "trailing_stop_atr": 3.0,       # 追踪止损 ATR 倍数，None=不止损
+    "vol_target": 0.10,             # 组合波动率目标，None=不做 vol targeting
 }
-
-
-def generate_signal(daily, cfg):
-    """根据配置生成信号。
-
-    动量类信号用比例调整价格（close），均线类信号用 Panama 调整价格（panama_close）。
-    """
-    if cfg["signal_fn"] == "momentum":
-        return momentum(daily["close"], lookback=cfg["momentum_lookback"])
-    elif cfg["signal_fn"] == "ma_crossover":
-        return ma_crossover(daily["panama_close"], fast=cfg["ma_fast"], slow=cfg["ma_slow"])
-    elif cfg["signal_fn"] == "combined_momentum":
-        return combined_momentum(daily["close"], lookbacks=cfg["combined_lookbacks"])
-    else:
-        raise ValueError(f"未知信号: {cfg['signal_fn']}")
 
 
 def main():
@@ -71,10 +57,16 @@ def main():
 
     products = cfg["products"]
     print(f"  本次运行: {products}")
+    print(f"  信号: {cfg['signal_fn']}")
+    stop_label = "关闭" if cfg["trailing_stop_atr"] is None else f"{cfg['trailing_stop_atr']}×ATR"
+    vol_label = "关闭" if cfg["vol_target"] is None else f"{cfg['vol_target']:.0%}"
+    print(f"  止损: {stop_label}")
+    print(f"  波动率目标: {vol_label}")
     print()
 
     # 收集每个品种的每日净收益，用于组合
     all_net_pnl = {}
+    all_positions = {}
 
     for product in products:
         if product not in all_data:
@@ -89,7 +81,7 @@ def main():
         print(f"{'=' * 50}")
 
         # 生成信号
-        signal = generate_signal(daily, cfg)
+        signal = generate_signal(daily, cfg["signal_fn"])
 
         # 计算仓位
         position = volatility_sized_position(
@@ -102,6 +94,17 @@ def main():
             point_value=params["point_value"],
             atr_period=cfg["atr_period"],
         )
+
+        # 追踪止损
+        if cfg["trailing_stop_atr"] is not None:
+            position = trailing_stop(
+                position, daily["close"],
+                atr_mult=cfg["trailing_stop_atr"],
+                atr_period=cfg["atr_period"],
+                high=daily["high"], low=daily["low"],
+            )
+
+        all_positions[product] = position
 
         # 回测
         result = run_backtest(
@@ -123,11 +126,36 @@ def main():
         all_net_pnl[product] = result["net_pnl"]
 
     # ============================================================
+    # 组合波动率目标（如果开启）
+    # ============================================================
+    if cfg["vol_target"] is not None and len(all_net_pnl) > 1:
+        portfolio_pnl_raw = pd.DataFrame(all_net_pnl).fillna(0).sum(axis=1)
+        scale = vol_target_portfolio(
+            portfolio_pnl_raw, cfg["initial_capital"],
+            target_vol=cfg["vol_target"], vol_window=60,
+        )
+
+        # 用缩放后的仓位重新跑回测
+        all_net_pnl = {}
+        for product in all_positions:
+            daily = all_data[product]
+            params = PRODUCTS[product]
+            scaled_pos = all_positions[product] * scale.reindex(all_positions[product].index).fillna(1.0)
+            result = run_backtest(
+                daily_price=daily, position=scaled_pos,
+                point_value=params["point_value"],
+                commission_per_contract=params["commission"],
+                slippage_points=params["slippage_points"],
+                initial_capital=cfg["initial_capital"],
+            )
+            all_net_pnl[product] = result["net_pnl"]
+
+    # ============================================================
     # 多品种组合
     # ============================================================
     if len(all_net_pnl) > 1:
         print(f"\n{'#' * 50}")
-        print(f"  组合绩效（{len(all_net_pnl)} 个品种等权）")
+        print(f"  组合绩效（{len(all_net_pnl)} 个品种）")
         print(f"{'#' * 50}")
 
         # 合并所有品种的每日净收益，缺失填0
@@ -142,7 +170,7 @@ def main():
         portfolio_result = pd.DataFrame({
             "net_pnl": portfolio_pnl,
             "equity": portfolio_equity,
-            "position": pnl_df.apply(lambda x: (x != 0).astype(int)).sum(axis=1),  # 活跃品种数
+            "position": pnl_df.apply(lambda x: (x != 0).astype(int)).sum(axis=1),
         })
 
         metrics = calc_metrics(portfolio_equity)

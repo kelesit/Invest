@@ -81,7 +81,7 @@ def main():
     print("加载数据...")
     all_data = load_multiple(DATA_DIR)
 
-    for period_name, period in [("全样本 (2019-2026)", None), ("训练期 (2019-2023)", "train"), ("测试期 (2024-2026)", "test")]:
+    for period_name, period in [("full (2019-2026)", None), ("train (2019-2023)", "train"), ("test (2024-2026)", "test")]:
         print(f"\n{'=' * 50}")
         print(f"  参数扫描 — {period_name}")
         print(f"{'=' * 50}")
