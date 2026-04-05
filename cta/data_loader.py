@@ -127,15 +127,60 @@ def load_continuous(file_path: str | Path) -> pd.DataFrame:
     return result
 
 
-def load_multiple(data_dir: str | Path, pattern: str = "*-continuous-*.dbn.zst") -> dict[str, pd.DataFrame]:
-    """批量加载多个品种的连续合约数据。
+def load_multiple(data_dir: str | Path, pattern: str = "*-continuous-ohlcv*.dbn.zst") -> dict[str, pd.DataFrame]:
+    """批量加载多个品种的主力连续合约数据（c.0）。
 
-    返回: {品种名: DataFrame} 字典
+    只加载 c.0 文件（不含 -c1- 的文件），返回: {品种名: DataFrame} 字典
     """
     data_dir = Path(data_dir)
     files = sorted(data_dir.glob(pattern))
     products = {}
     for f in files:
+        # 跳过 c.1 等非主力合约文件
+        if "-c1-" in f.name or "-c2-" in f.name:
+            continue
         name = f.name.split("-")[0]
         products[name] = load_continuous(f)
     return products
+
+
+def load_carry_data(data_dir: str | Path) -> dict[str, pd.DataFrame]:
+    """加载 carry 因子所需的数据：c.0 和 c.1 的原始收盘价。
+
+    Carry 需要未调整的原始价格来计算近月-远月价差，
+    不能用 ratio/panama 调整后的价格。
+
+    返回: {品种名: DataFrame(front_close, back_close)} 字典
+    """
+    data_dir = Path(data_dir)
+
+    # 找到所有 c.0 文件
+    c0_files = {}
+    for f in sorted(data_dir.glob("*-continuous-ohlcv*.dbn.zst")):
+        if "-c1-" not in f.name and "-c2-" not in f.name:
+            name = f.name.split("-")[0]
+            c0_files[name] = f
+
+    # 找到所有 c.1 文件
+    c1_files = {}
+    for f in sorted(data_dir.glob("*-continuous-c1-*.dbn.zst")):
+        name = f.name.split("-")[0]
+        c1_files[name] = f
+
+    result = {}
+    for name in c0_files:
+        if name not in c1_files:
+            continue
+
+        front = _load_raw(c0_files[name])
+        back = _load_raw(c1_files[name])
+
+        # 对齐日期，取原始收盘价（未调整）
+        common_idx = front.index.intersection(back.index)
+        carry_df = pd.DataFrame({
+            "front_close": front.loc[common_idx, "close"],
+            "back_close": back.loc[common_idx, "close"],
+        })
+        result[name] = carry_df
+
+    return result

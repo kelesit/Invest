@@ -2,8 +2,11 @@
 
 三种权重分配方式：
     1. 等权 (equal weight) — 每个品种分配相同资金
-    2. 风险平价 (risk parity) — 每个品种贡献相同风险
-    3. 动态风险平价 — 用滚动相关性和波动率实时调整权重
+    2. 逆波动率 (inverse volatility) — 波动率低的品种权重高，风险平价在不考虑相关性时的简化版
+    3. 风险平价 (risk parity) — 用滚动协方差矩阵，使每个品种的风险贡献相等，动态更新权重
+
+辅助函数：
+    calc_dynamic_correlation — 计算品种间滚动相关性，用于分析和可视化
 """
 
 import numpy as np
@@ -100,12 +103,13 @@ def risk_parity_weights(
 
 
 def _solve_risk_parity(cov_matrix: np.ndarray, max_iter: int = 100, tol: float = 1e-8) -> np.ndarray:
-    """求解风险平价权重（Newton-Raphson 迭代法的简化版本）。
+    """求解风险平价权重（不动点迭代法）。
 
-    使用 Spinu (2013) 的公式化简：
-    w_i ∝ 1 / (Σw)_i
+    迭代公式：w_i ∝ 1 / (Σw)_i
+    从等权开始，通常 10-20 次收敛。
 
-    从等权开始迭代，通常 10-20 次收敛。
+    参考: Maillard, Roncalli & Teïlétché (2010),
+    "The Properties of Equally Weighted Risk Contribution Portfolios"
     """
     n = len(cov_matrix)
     w = np.ones(n) / n

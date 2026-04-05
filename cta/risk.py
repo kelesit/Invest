@@ -115,6 +115,9 @@ def vol_scale(
     scale_factor = target_vol / realized_vol.replace(0, np.nan)
     scale_factor = scale_factor.clip(0, vol_cap).fillna(1.0)
 
+    # 用前一天的缩放系数，避免前视偏差
+    scale_factor = scale_factor.shift(1).fillna(1.0)
+
     return position * scale_factor
 
 

@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">MACD explanation diagram</title>
+  <desc id="desc">An infographic explaining how MACD is built from EMA12 and EMA26, and how to read the MACD line, signal line, and histogram.</desc>
+
+  <defs>
+    <style>
+      .bg { fill: #f7f3ea; }
+      .panel { fill: #fffdf8; stroke: #2f3437; stroke-width: 2; rx: 18; ry: 18; }
+      .panel-soft { fill: #fff8ef; stroke: #c87b2a; stroke-width: 2; rx: 18; ry: 18; }
+      .title { font: 700 30px "Helvetica Neue", Arial, sans-serif; fill: #1f2428; }
+      .subtitle { font: 400 16px "Helvetica Neue", Arial, sans-serif; fill: #46515a; }
+      .section { font: 700 20px "Helvetica Neue", Arial, sans-serif; fill: #1f2428; }
+      .body { font: 400 15px "Helvetica Neue", Arial, sans-serif; fill: #2f3437; }
+      .small { font: 400 13px "Helvetica Neue", Arial, sans-serif; fill: #5c6670; }
+      .price { fill: none; stroke: #2f3437; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .emaFast { fill: none; stroke: #e07a2d; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .emaSlow { fill: none; stroke: #2d6cdf; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .macd { fill: none; stroke: #16815b; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .signal { fill: none; stroke: #a33b8c; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+      .zero { stroke: #7d8891; stroke-width: 1.5; stroke-dasharray: 6 6; }
+      .grid { stroke: #e6dfd1; stroke-width: 1; }
+      .barPos { fill: #3aa272; }
+      .barNeg { fill: #d96a5f; }
+      .accentBox { fill: #f1eadf; stroke: #b38d54; stroke-width: 1.5; rx: 14; ry: 14; }
+      .arrow { fill: none; stroke: #2f3437; stroke-width: 2.5; marker-end: url(#arrowhead); }
+      .legendDot { stroke-width: 4; stroke-linecap: round; }
+    </style>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f3437" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="760" />
+
+  <text x="60" y="62" class="title">MACD: 用“快慢均线的距离变化”看趋势是否在加速</text>
+  <text x="60" y="92" class="subtitle">先看价格，再看 EMA12 和 EMA26 的差，再看这个差本身是在扩大还是缩小。</text>
+
+  <rect class="panel" x="50" y="125" width="690" height="255" />
+  <text x="75" y="160" class="section">1. 价格面板：快均线先动，慢均线后动</text>
+  <line class="grid" x1="90" y1="200" x2="705" y2="200" />
+  <line class="grid" x1="90" y1="250" x2="705" y2="250" />
+  <line class="grid" x1="90" y1="300" x2="705" y2="300" />
+  <polyline class="price" points="100,320 135,314 170,300 205,305 240,286 275,275 310,282 345,252 380,240 415,230 450,216 485,228 520,205 555,188 590,176 625,165 660,156 695,150" />
+  <polyline class="emaFast" points="100,324 135,318 170,309 205,300 240,290 275,281 310,271 345,258 380,245 415,232 450,221 485,214 520,205 555,194 590,182 625,171 660,161 695,154" />
+  <polyline class="emaSlow" points="100,328 135,325 170,321 205,316 240,310 275,303 310,295 345,285 380,274 415,262 450,250 485,240 520,229 555,217 590,205 625,193 660,182 695,172" />
+
+  <text x="101" y="352" class="small">价格开始上行后，EMA12 比 EMA26 更快抬头，因此两条线之间的距离开始扩大。</text>
+  <line x1="112" y1="177" x2="142" y2="177" class="price legendDot" />
+  <text x="150" y="182" class="body">价格</text>
+  <line x1="220" y1="177" x2="250" y2="177" class="emaFast legendDot" />
+  <text x="258" y="182" class="body">EMA12（快）</text>
+  <line x1="385" y1="177" x2="415" y2="177" class="emaSlow legendDot" />
+  <text x="423" y="182" class="body">EMA26（慢）</text>
+
+  <rect class="panel-soft" x="770" y="125" width="380" height="255" />
+  <text x="795" y="160" class="section">2. 公式链：MACD 其实是三层信息</text>
+
+  <rect class="accentBox" x="795" y="185" width="145" height="54" />
+  <text x="818" y="218" class="body">EMA12</text>
+  <rect class="accentBox" x="995" y="185" width="145" height="54" />
+  <text x="1018" y="218" class="body">EMA26</text>
+  <line class="arrow" x1="940" y1="212" x2="980" y2="212" />
+
+  <rect class="accentBox" x="835" y="260" width="270" height="62" />
+  <text x="860" y="287" class="body">MACD 线 = EMA12 - EMA26</text>
+  <text x="860" y="307" class="small">表示快线领先慢线多少</text>
+  <line class="arrow" x1="870" y1="240" x2="900" y2="260" />
+  <line class="arrow" x1="1065" y1="240" x2="1040" y2="260" />
+
+  <rect class="accentBox" x="835" y="338" width="270" height="62" />
+  <text x="860" y="365" class="body">信号线 = EMA(MACD, 9)</text>
+  <text x="860" y="385" class="small">是 MACD 本身的均线，更慢更平滑</text>
+  <line class="arrow" x1="970" y1="322" x2="970" y2="338" />
+
+  <rect class="accentBox" x="835" y="416" width="270" height="62" />
+  <text x="853" y="443" class="body">柱状图 = MACD - 信号线</text>
+  <text x="853" y="463" class="small">衡量“距离是在扩大还是缩小”</text>
+  <line class="arrow" x1="970" y1="400" x2="970" y2="416" />
+
+  <rect class="panel" x="50" y="405" width="690" height="290" />
+  <text x="75" y="440" class="section">3. 怎么读：MACD 看方向，柱状图看加速度</text>
+
+  <line class="grid" x1="90" y1="510" x2="705" y2="510" />
+  <line class="grid" x1="90" y1="565" x2="705" y2="565" />
+  <line class="grid" x1="90" y1="620" x2="705" y2="620" />
+  <line class="zero" x1="90" y1="565" x2="705" y2="565" />
+  <polyline class="macd" points="100,595 135,602 170,590 205,560 240,528 275,500 310,478 345,486 380,505 415,525 450,540 485,550 520,562 555,582 590,600 625,608 660,616 695,624" />
+  <polyline class="signal" points="100,598 135,600 170,597 205,585 240,565 275,540 310,518 345,510 380,512 415,520 450,531 485,542 520,553 555,567 590,585 625,598 660,608 695,616" />
+
+  <text x="101" y="655" class="small">绿色 MACD 线在前，紫色信号线在后。两者的差值就是下面的柱状图。</text>
+  <line x1="110" y1="463" x2="140" y2="463" class="macd legendDot" />
+  <text x="148" y="468" class="body">MACD 线</text>
+  <line x1="255" y1="463" x2="285" y2="463" class="signal legendDot" />
+  <text x="293" y="468" class="body">信号线</text>
+
+  <line class="zero" x1="90" y1="680" x2="705" y2="680" />
+  <rect class="barNeg" x="108" y="680" width="20" height="18" />
+  <rect class="barNeg" x="143" y="680" width="20" height="12" />
+  <rect class="barNeg" x="178" y="680" width="20" height="8" />
+  <rect class="barPos" x="213" y="664" width="20" height="16" />
+  <rect class="barPos" x="248" y="646" width="20" height="34" />
+  <rect class="barPos" x="283" y="632" width="20" height="48" />
+  <rect class="barPos" x="318" y="638" width="20" height="42" />
+  <rect class="barPos" x="353" y="653" width="20" height="27" />
+  <rect class="barNeg" x="388" y="680" width="20" height="8" />
+  <rect class="barNeg" x="423" y="680" width="20" height="16" />
+  <rect class="barNeg" x="458" y="680" width="20" height="10" />
+  <rect class="barPos" x="493" y="674" width="20" height="6" />
+  <rect class="barPos" x="528" y="668" width="20" height="12" />
+  <rect class="barNeg" x="563" y="680" width="20" height="8" />
+  <rect class="barNeg" x="598" y="680" width="20" height="14" />
+  <rect class="barNeg" x="633" y="680" width="20" height="10" />
+  <rect class="barNeg" x="668" y="680" width="20" height="8" />
+
+  <text x="98" y="713" class="small">柱状图</text>
+  <text x="160" y="713" class="small">大于 0：上涨动能占优</text>
+  <text x="370" y="713" class="small">小于 0：下跌动能占优</text>
+
+  <rect class="panel-soft" x="770" y="405" width="380" height="290" />
+  <text x="795" y="440" class="section">4. 三种最常见读法</text>
+
+  <rect class="accentBox" x="795" y="465" width="330" height="58" />
+  <text x="816" y="491" class="body">柱状图从负变正</text>
+  <text x="816" y="511" class="small">快线开始超过慢线，趋势可能由跌转涨。</text>
+
+  <rect class="accentBox" x="795" y="540" width="330" height="58" />
+  <text x="816" y="566" class="body">柱状图仍为正，但在缩短</text>
+  <text x="816" y="586" class="small">上涨还在，但加速度变弱，说明趋势可能在衰减。</text>
+
+  <rect class="accentBox" x="795" y="615" width="330" height="58" />
+  <text x="816" y="641" class="body">柱状图从正变负</text>
+  <text x="816" y="661" class="small">快线回到慢线下方，趋势可能由涨转跌。</text>
+
+  <text x="60" y="735" class="subtitle">一句话记忆：MACD 看“快线和慢线差多少”，柱状图看“这个差值是继续扩大还是开始收缩”。</text>
+</svg>

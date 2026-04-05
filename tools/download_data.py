@@ -23,7 +23,8 @@ SCHEMA = "ohlcv-1d"
 START = "2019-01-01"
 END = "2026-03-31"
 
-# 品种：使用连续合约符号 {root}.c.0 = 主力合约
+# 品种：使用连续合约符号 {root}.c.N
+# c.0 = 主力合约（front month），c.1 = 第二合约（back month）
 PRODUCTS = {
     "ES": "E-mini S&P 500",
     "CL": "Crude Oil",
@@ -31,21 +32,27 @@ PRODUCTS = {
     "ZN": "10-Year Treasury Note",
 }
 
+# 要下载的连续合约编号（0=主力, 1=次主力）
+CONTRACT_RANKS = [0, 1]
+
 
 def build_download_list() -> list[dict]:
     """生成下载任务列表：每个品种一个请求。"""
     tasks = []
     for root, name in PRODUCTS.items():
-        symbol = f"{root}.c.0"
-        filename = f"{root}-continuous-{SCHEMA}-{START}_{END}.dbn.zst"
-        filepath = OUTPUT_DIR / filename
+        for rank in CONTRACT_RANKS:
+            symbol = f"{root}.c.{rank}"
+            rank_suffix = f"-c{rank}" if rank > 0 else ""
+            filename = f"{root}-continuous{rank_suffix}-{SCHEMA}-{START}_{END}.dbn.zst"
+            filepath = OUTPUT_DIR / filename
 
-        tasks.append({
-            "symbol": symbol,
-            "root": root,
-            "name": name,
-            "filepath": filepath,
-        })
+            tasks.append({
+                "symbol": symbol,
+                "root": root,
+                "rank": rank,
+                "name": f"{name} (c.{rank})",
+                "filepath": filepath,
+            })
     return tasks
 
 

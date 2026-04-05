@@ -5,7 +5,9 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "databento>=0.74.0",
+    "ipykernel>=7.2.0",
     "matplotlib>=3.10.8",
+    "nbclient>=0.10.4",
     "numpy>=2.4.4",
     "pandas>=3.0.1",
     "python-dotenv>=1.2.2",

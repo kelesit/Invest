@@ -264,6 +264,41 @@ def adx_dmi(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14)
 
 
 # ============================================================
+# Carry 因子（非价格趋势类，用期限结构数据）
+# ============================================================
+
+def carry(front_close: pd.Series, back_close: pd.Series, smooth: int = 5) -> pd.Series:
+    """Carry 因子：近月-远月价差。
+
+    经典定义：
+        carry = (F_near - F_far) / F_near
+        正值 = backwardation（现货溢价）→ 做多有利
+        负值 = contango（期货溢价）→ 做空有利
+
+    本项目实现：
+        计算原始 carry 值后，用滚动标准差归一化到 [-1, +1]。
+        smooth 参数对原始 carry 做短期平滑，减少日间噪音。
+
+    参数:
+        front_close: 主力合约（c.0）收盘价（未调整）
+        back_close: 次主力合约（c.1）收盘价（未调整）
+        smooth: 平滑窗口（天）
+    """
+    raw_carry = (front_close - back_close) / front_close.replace(0, np.nan)
+
+    # 短期平滑
+    if smooth > 1:
+        raw_carry = raw_carry.rolling(smooth, min_periods=1).mean()
+
+    # 归一化到 [-1, +1]
+    rolling_std = raw_carry.rolling(252, min_periods=63).std()
+    normalized = raw_carry / rolling_std.replace(0, np.nan)
+    normalized = normalized.clip(-2, 2) / 2
+
+    return normalized.fillna(0.0)
+
+
+# ============================================================
 # 信号注册表
 # ============================================================
 
