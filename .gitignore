@@ -10,10 +10,10 @@ wheels/
 .venv
 
 # Data files (Databento downloads)
-data/
+#data/
 
 # Output (charts, reports)
-output/
+#output/
 
 # Environment secrets
 .env
