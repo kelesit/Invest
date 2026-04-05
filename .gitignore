@@ -17,3 +17,4 @@ output/
 
 # Environment secrets
 .env
+.DS_Store
