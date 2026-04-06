@@ -18,3 +18,5 @@ wheels/
 # Environment secrets
 .env
 .DS_Store
+
+weekly_*.md
