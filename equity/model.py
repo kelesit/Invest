@@ -173,6 +173,7 @@ def train_and_predict(
 def run_cv_pipeline(
     features: pd.DataFrame,
     labels: pd.Series,
+    raw_labels: pd.Series | None = None,
     params: dict | None = None,
     n_splits: int = 5,
     train_days: int = 500,
@@ -184,25 +185,36 @@ def run_cv_pipeline(
 
     Args:
         features: MultiIndex (date, ticker) DataFrame with feature columns.
-        labels: MultiIndex (date, ticker) Series of labels.
+        labels: MultiIndex (date, ticker) Series of labels (used for training).
+        raw_labels: Optional original labels before transformation (e.g. raw
+            residual returns before ranking). If provided, stored in the 'actual'
+            column for evaluation. If None, labels are used directly.
         params: LightGBM parameters.
         n_splits, train_days, test_days, purge_days, embargo_days: CV config.
 
     Returns:
         (predictions_df, models_list)
-        predictions_df: DataFrame with columns [date, ticker, prediction, actual]
-            containing out-of-sample predictions from all folds.
+        predictions_df: DataFrame with columns [prediction, actual] where
+            actual = raw_labels (if provided) or labels.
         models_list: List of trained LightGBM models (one per fold).
     """
     # Align features and labels — drop rows where either is NaN
     common_idx = features.index.intersection(labels.index)
+    if raw_labels is not None:
+        common_idx = common_idx.intersection(raw_labels.index)
     features = features.loc[common_idx]
     labels = labels.loc[common_idx]
+    if raw_labels is not None:
+        raw_labels = raw_labels.loc[common_idx]
 
     # Drop rows with any NaN in features or labels
     valid_mask = features.notna().all(axis=1) & labels.notna()
+    if raw_labels is not None:
+        valid_mask = valid_mask & raw_labels.notna()
     features = features.loc[valid_mask]
     labels = labels.loc[valid_mask]
+    if raw_labels is not None:
+        raw_labels = raw_labels.loc[valid_mask]
 
     dates = features.index.get_level_values("date")
     unique_dates = dates.unique().sort_values()
@@ -238,9 +250,10 @@ def run_cv_pipeline(
         preds, model = train_and_predict(X_train, y_train, X_test, params)
         all_models.append(model)
 
+        actual_values = raw_labels.loc[test_mask].values if raw_labels is not None else y_test.values
         fold_df = pd.DataFrame({
             "prediction": preds,
-            "actual": y_test.values,
+            "actual": actual_values,
         }, index=X_test.index)
         all_predictions.append(fold_df)
 
