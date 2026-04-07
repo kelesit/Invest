@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Data files (Databento downloads)
-#data/
+data/equity/
 
 # Output (charts, reports)
 #output/

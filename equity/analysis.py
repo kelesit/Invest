@@ -100,8 +100,27 @@ def quantile_analysis(
     """
     def _assign_quantile(group):
         group = group.copy()
-        group["quantile"] = pd.qcut(
-            group["prediction"], n_groups, labels=range(1, n_groups + 1), duplicates="drop"
+        valid_predictions = group["prediction"].dropna()
+        n_unique = valid_predictions.nunique()
+
+        if n_unique < 2:
+            group["quantile"] = np.nan
+            return group
+
+        actual_groups = min(n_groups, n_unique)
+        _, bins = pd.qcut(valid_predictions, actual_groups, retbins=True, duplicates="drop")
+        n_bins = len(bins) - 1
+        if n_bins < 1:
+            group["quantile"] = np.nan
+            return group
+        labels = list(range(1, n_bins + 1))
+
+        # Use pre-computed bins via pd.cut for consistency
+        group["quantile"] = pd.cut(
+            group["prediction"],
+            bins=bins,
+            labels=labels,
+            include_lowest=True,
         )
         return group
 

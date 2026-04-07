@@ -12,6 +12,7 @@ Reference: Marcos López de Prado, "Advances in Financial Machine Learning", Ch.
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
+from lightgbm.basic import LightGBMError
 
 
 # Conservative hyperparameters — prefer underfitting to overfitting
@@ -29,6 +30,50 @@ DEFAULT_PARAMS = {
     "min_child_samples": 100,
     "verbose": -1,
 }
+
+
+def _train_with_device_fallback(
+    params: dict,
+    train_set: lgb.Dataset,
+    val_set: lgb.Dataset,
+    num_boost_round: int,
+    callbacks: list,
+) -> lgb.Booster:
+    """Train LightGBM with GPU preference and CPU fallback.
+
+    If the caller already specifies a device, honor it as-is.
+    Otherwise try CUDA, then generic GPU, and finally CPU.
+    """
+    explicit_device = params.get("device_type") or params.get("device")
+    if explicit_device:
+        return lgb.train(
+            params,
+            train_set,
+            num_boost_round=num_boost_round,
+            valid_sets=[val_set],
+            callbacks=callbacks,
+        )
+
+    last_error: Exception | None = None
+    for device_type in ("cuda", "gpu", "cpu"):
+        attempt_params = params.copy()
+        attempt_params["device_type"] = device_type
+        try:
+            model = lgb.train(
+                attempt_params,
+                train_set,
+                num_boost_round=num_boost_round,
+                valid_sets=[val_set],
+                callbacks=callbacks,
+            )
+            print(f"LightGBM device: {device_type}")
+            return model
+        except LightGBMError as exc:
+            last_error = exc
+            if device_type != "cpu":
+                print(f"LightGBM {device_type} unavailable, falling back: {exc}")
+
+    raise RuntimeError(f"LightGBM training failed on all device types. Last error: {last_error}") from last_error
 
 
 def purged_time_series_cv(
@@ -113,11 +158,11 @@ def train_and_predict(
 
     callbacks = [lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(0)]
 
-    model = lgb.train(
+    model = _train_with_device_fallback(
         params,
         train_set,
+        val_set,
         num_boost_round=num_boost_round,
-        valid_sets=[val_set],
         callbacks=callbacks,
     )
 

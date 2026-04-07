@@ -1,6 +1,9 @@
 """S&P 500 stock data download and management via yfinance."""
 
+from io import StringIO
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import pandas as pd
 import yfinance as yf
@@ -13,7 +16,23 @@ import yfinance as yf
 def get_sp500_tickers() -> list[str]:
     """Scrape current S&P 500 tickers from Wikipedia."""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = pd.read_html(url)
+    request = Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
+        },
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            html = response.read().decode("utf-8")
+    except (HTTPError, URLError) as exc:
+        raise RuntimeError(f"Failed to fetch S&P 500 constituents from Wikipedia: {exc}") from exc
+
+    tables = pd.read_html(StringIO(html))
     tickers = tables[0]["Symbol"].str.strip().tolist()
     # yfinance uses dots not hyphens (BRK.B not BRK-B)
     tickers = [t.replace(".", "-") for t in tickers]
