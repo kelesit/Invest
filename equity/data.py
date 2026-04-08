@@ -13,8 +13,8 @@ import yfinance as yf
 # If Wikipedia changes its table layout, this function will need updating.
 
 
-def get_sp500_tickers() -> list[str]:
-    """Scrape current S&P 500 tickers from Wikipedia."""
+def _fetch_sp500_table() -> pd.DataFrame:
+    """Fetch the S&P 500 constituents table from Wikipedia."""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     request = Request(
         url,
@@ -33,10 +33,22 @@ def get_sp500_tickers() -> list[str]:
         raise RuntimeError(f"Failed to fetch S&P 500 constituents from Wikipedia: {exc}") from exc
 
     tables = pd.read_html(StringIO(html))
-    tickers = tables[0]["Symbol"].str.strip().tolist()
-    # yfinance uses dots not hyphens (BRK.B not BRK-B)
-    tickers = [t.replace(".", "-") for t in tickers]
-    return sorted(tickers)
+    df = tables[0].copy()
+    # yfinance uses hyphens not dots (BRK-B not BRK.B)
+    df["Symbol"] = df["Symbol"].str.strip().str.replace(".", "-", regex=False)
+    return df
+
+
+def get_sp500_tickers() -> list[str]:
+    """Scrape current S&P 500 tickers from Wikipedia."""
+    df = _fetch_sp500_table()
+    return sorted(df["Symbol"].tolist())
+
+
+def get_sp500_sectors() -> dict[str, str]:
+    """Return a mapping of ticker → GICS Sector for current S&P 500 stocks."""
+    df = _fetch_sp500_table()
+    return dict(zip(df["Symbol"], df["GICS Sector"]))
 
 
 def download_stock_data(
