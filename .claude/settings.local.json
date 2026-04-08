@@ -8,7 +8,8 @@
       "WebFetch(domain:blog.quantinsti.com)",
       "Bash(ls:*)",
       "Bash(uv add:*)",
-      "Bash(uv sync:*)"
+      "Bash(uv sync:*)",
+      "Bash(python3)"
     ]
   }
 }
