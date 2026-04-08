@@ -140,6 +140,7 @@ def train_and_predict(
     params: dict | None = None,
     num_boost_round: int = 500,
     early_stopping_rounds: int = 50,
+    categorical_features: list[str] | None = None,
 ) -> np.ndarray:
     """Train LightGBM and return predictions on test set.
 
@@ -153,8 +154,9 @@ def train_and_predict(
     X_tr, X_val = X_train.iloc[:-val_size], X_train.iloc[-val_size:]
     y_tr, y_val = y_train.iloc[:-val_size], y_train.iloc[-val_size:]
 
-    train_set = lgb.Dataset(X_tr, label=y_tr)
-    val_set = lgb.Dataset(X_val, label=y_val)
+    cat_cols = categorical_features or "auto"
+    train_set = lgb.Dataset(X_tr, label=y_tr, categorical_feature=cat_cols)
+    val_set = lgb.Dataset(X_val, label=y_val, categorical_feature=cat_cols)
 
     callbacks = [lgb.early_stopping(early_stopping_rounds), lgb.log_evaluation(0)]
 
@@ -180,6 +182,7 @@ def run_cv_pipeline(
     test_days: int = 60,
     purge_days: int = 10,
     embargo_days: int = 5,
+    categorical_features: list[str] | None = None,
 ) -> tuple[pd.DataFrame, list]:
     """Run full purged CV pipeline: split → train → predict for each fold.
 
@@ -247,7 +250,10 @@ def run_cv_pipeline(
             f"test {test_dates[0].date()}→{test_dates[-1].date()} ({len(X_test)} samples)"
         )
 
-        preds, model = train_and_predict(X_train, y_train, X_test, params)
+        preds, model = train_and_predict(
+            X_train, y_train, X_test, params,
+            categorical_features=categorical_features,
+        )
         all_models.append(model)
 
         actual_values = raw_labels.loc[test_mask].values if raw_labels is not None else y_test.values

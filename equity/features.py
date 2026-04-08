@@ -1,11 +1,16 @@
-"""Feature engineering for equity momentum strategy.
+"""Feature engineering for equity cross-sectional momentum.
 
-~50 price/volume features organized in 5 categories:
-1. Price momentum (returns, MA deviation, 52w high/low)
-2. Volume features (volume ratio, price-volume divergence)
-3. Volatility features (realized vol, ATR, intraday range)
-4. Technical indicators (RSI, MACD, Bollinger %B)
-5. Cross-sectional rank transformation
+~18 features organized in 4 groups, each answering a distinct question:
+
+1. Basic momentum — 谁最近更强？ (5 features)
+2. Skip momentum — 去掉近期噪音后谁更强？ (3 features)
+3. Path quality — 动量是稳态趋势还是靠几根大阳线硬拉？ (6 features)
+4. Risk-adjusted momentum — 单位风险下谁更强？ (4 features)
+
+Design principles:
+- Each feature maps to a testable hypothesis about future returns
+- Minimal redundancy between features (no ret_5d + ma_dev_5d + rsi_5 synonyms)
+- Raw values → single cross-sectional rank at the end, no double transformation
 """
 
 import numpy as np
@@ -13,233 +18,158 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# 1. Price momentum features
+# 1. Basic momentum — 不同时间窗口的过去收益
 # ---------------------------------------------------------------------------
 
-def _returns(close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Multi-window log returns."""
+def _basic_momentum(close: pd.Series) -> pd.DataFrame:
+    """Multi-window returns: who has been stronger recently?"""
+    return pd.DataFrame({
+        f"ret_{w}d": close.pct_change(w)
+        for w in [5, 10, 20, 60, 120]
+    }, index=close.index)
+
+
+# ---------------------------------------------------------------------------
+# 2. Skip momentum — 去掉近期反转噪音，保留趋势延续部分
+#
+# 预测未来 10 天时，最近几天的价格包含短期反转成分，
+# skip 掉后更接近"可延续的动量"。
+# Reference: Jegadeesh & Titman (1993) skip most recent month.
+# ---------------------------------------------------------------------------
+
+def _skip_momentum(close: pd.Series) -> pd.DataFrame:
+    """Returns with recent days removed to isolate trend continuation."""
+    close_5 = close.shift(5)
+    close_20 = close.shift(20)
+    return pd.DataFrame({
+        "skip5_ret_20d": close_5 / close.shift(20) - 1,    # T-20 → T-5
+        "skip5_ret_60d": close_5 / close.shift(60) - 1,    # T-60 → T-5
+        "skip20_ret_120d": close_20 / close.shift(120) - 1, # T-120 → T-20
+    }, index=close.index)
+
+
+# ---------------------------------------------------------------------------
+# 3. Path quality — 同样涨 8%，平滑上行 vs 暴涨暴跌完全不同
+#
+# 路径特征是 LightGBM 能发挥优势的地方：
+# 它能学到 "强动量 + 平滑路径" vs "强动量 + 高波动" 的区别。
+# ---------------------------------------------------------------------------
+
+def _path_quality(close: pd.Series, high: pd.Series) -> pd.DataFrame:
+    """Path characteristics: how the return was achieved matters."""
+    daily_ret = close.pct_change()
+
     out = {}
-    for w in windows:
-        out[f"ret_{w}d"] = close.pct_change(w)
+
+    # Efficiency ratio: |net move| / sum(|daily moves|)
+    # 接近 1 = 单边平滑行情，接近 0 = 来回震荡
+    for w in [20, 60]:
+        net_move = (close / close.shift(w) - 1).abs()
+        total_move = daily_ret.abs().rolling(w).sum()
+        out[f"efficiency_{w}d"] = net_move / total_move.replace(0, np.nan)
+
+    # Up-day ratio: 过去 20 天有多少天是涨的
+    # 区分"广泛上涨"和"靠单日大阳线拉动"
+    out["up_ratio_20d"] = (daily_ret > 0).astype(float).rolling(20).mean()
+
+    # Return concentration: 前 3 大日收益占总正收益的比例
+    # 高 = 收益靠少数几天，低 = 收益均匀分布
+    def _top3_concentration(arr: np.ndarray) -> float:
+        if np.isnan(arr).any():
+            return np.nan
+        pos = arr[arr > 0]
+        if len(pos) == 0:
+            return np.nan
+        pos.sort()
+        return pos[-3:].sum() / pos.sum()
+
+    out["ret_concentration_20d"] = daily_ret.rolling(20).apply(
+        _top3_concentration, raw=True
+    )
+
+    # Max drawdown over 20 days
+    # 正在回撤的股票 vs 处于高位的股票，未来行为不同
+    rolling_max = high.rolling(20).max()
+    out["max_dd_20d"] = close / rolling_max - 1  # <= 0
+
+    # Distance to 60-day high
+    rolling_max_60 = high.rolling(60).max()
+    out["dist_high_60d"] = close / rolling_max_60 - 1
+
     return pd.DataFrame(out, index=close.index)
 
 
-def _ma_deviation(close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Close / SMA ratio — measures deviation from moving average."""
-    out = {}
-    for w in windows:
-        sma = close.rolling(w).mean()
-        out[f"ma_dev_{w}d"] = close / sma - 1
-    return pd.DataFrame(out, index=close.index)
-
-
-def _high_low_distance(close: pd.Series, high: pd.Series, low: pd.Series) -> pd.DataFrame:
-    """Distance from 52-week (252-day) high and low."""
-    high_252 = high.rolling(252).max()
-    low_252 = low.rolling(252).min()
-    return pd.DataFrame({
-        "dist_52w_high": close / high_252 - 1,  # <= 0, how far below high
-        "dist_52w_low": close / low_252 - 1,    # >= 0, how far above low
-    }, index=close.index)
-
-
-def _momentum_acceleration(close: pd.Series) -> pd.DataFrame:
-    """Momentum acceleration: short-term minus long-term momentum."""
-    ret_5 = close.pct_change(5)
-    ret_20 = close.pct_change(20)
-    ret_60 = close.pct_change(60)
-    ret_120 = close.pct_change(120)
-    return pd.DataFrame({
-        "mom_accel_5_20": ret_5 - ret_20,
-        "mom_accel_20_60": ret_20 - ret_60,
-        "mom_accel_60_120": ret_60 - ret_120,
-    }, index=close.index)
-
-
 # ---------------------------------------------------------------------------
-# 2. Volume features
+# 4. Risk-adjusted momentum — 单位风险的强度
+#
+# 预测残差收益时，原始涨幅不够，需要看"波动率标准化后的强度"。
+# 区分"安静地强"和"高噪音地乱冲"。
 # ---------------------------------------------------------------------------
 
-def _volume_ratio(volume: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Volume relative to its moving average."""
-    out = {}
-    for w in windows:
-        vol_ma = volume.rolling(w).mean()
-        out[f"vol_ratio_{w}d"] = volume / vol_ma
-    return pd.DataFrame(out, index=volume.index)
-
-
-def _volume_trend(volume: pd.Series) -> pd.DataFrame:
-    """Volume trend: short MA / long MA of volume."""
-    vol_5 = volume.rolling(5).mean()
-    vol_20 = volume.rolling(20).mean()
-    vol_60 = volume.rolling(60).mean()
-    return pd.DataFrame({
-        "vol_trend_5_20": vol_5 / vol_20,
-        "vol_trend_20_60": vol_20 / vol_60,
-    }, index=volume.index)
-
-
-def _price_volume_divergence(close: pd.Series, volume: pd.Series) -> pd.DataFrame:
-    """Price-volume divergence: sign agreement between price change and volume change."""
-    price_chg = close.pct_change(5)
-    vol_chg = volume.rolling(5).mean() / volume.rolling(20).mean() - 1
-    return pd.DataFrame({
-        "pv_divergence": price_chg * vol_chg,
-    }, index=close.index)
-
-
-# ---------------------------------------------------------------------------
-# 3. Volatility features
-# ---------------------------------------------------------------------------
-
-def _realized_vol(close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Realized volatility (std of daily returns) over multiple windows."""
+def _risk_adjusted_momentum(close: pd.Series) -> pd.DataFrame:
+    """Momentum strength per unit of risk."""
     daily_ret = close.pct_change()
     out = {}
-    for w in windows:
-        out[f"rvol_{w}d"] = daily_ret.rolling(w).std()
+
+    # Return / volatility (类似 rolling Sharpe)
+    for w in [20, 60]:
+        ret = close.pct_change(w)
+        vol = daily_ret.rolling(w).std() * np.sqrt(w)
+        out[f"ret_vol_{w}d"] = ret / vol.replace(0, np.nan)
+
+    # Linear regression slope / RMSE
+    # 价格对时间回归的斜率 = 趋势方向与强度
+    # RMSE = 围绕趋势线的噪音
+    # slope / RMSE = 趋势的信噪比
+    for w in [20, 60]:
+        x = np.arange(w, dtype=float)
+        x_mean = x.mean()
+        x_var = ((x - x_mean) ** 2).sum()
+
+        def _slope_over_rmse(window: np.ndarray) -> float:
+            if np.isnan(window).any():
+                return np.nan
+            y = window
+            y_mean = y.mean()
+            slope = ((x - x_mean) * (y - y_mean)).sum() / x_var
+            predicted = y_mean + slope * (x - x_mean)
+            rmse = np.sqrt(((y - predicted) ** 2).mean())
+            if rmse == 0:
+                return np.nan
+            # Normalize slope by mean price level to make it comparable
+            return (slope / y_mean) / (rmse / y_mean)
+
+        out[f"slope_rmse_{w}d"] = close.rolling(w).apply(
+            _slope_over_rmse, raw=True
+        )
+
     return pd.DataFrame(out, index=close.index)
-
-
-def _vol_change(close: pd.Series) -> pd.DataFrame:
-    """Volatility regime change: short-term vol / long-term vol."""
-    daily_ret = close.pct_change()
-    vol_5 = daily_ret.rolling(5).std()
-    vol_20 = daily_ret.rolling(20).std()
-    vol_60 = daily_ret.rolling(60).std()
-    return pd.DataFrame({
-        "vol_change_5_20": vol_5 / vol_20,
-        "vol_change_5_60": vol_5 / vol_60,
-    }, index=close.index)
-
-
-def _intraday_range(high: pd.Series, low: pd.Series, close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Average intraday range (high-low)/close over windows."""
-    daily_range = (high - low) / close
-    out = {}
-    for w in windows:
-        out[f"intraday_range_{w}d"] = daily_range.rolling(w).mean()
-    return pd.DataFrame(out, index=close.index)
-
-
-def _atr(high: pd.Series, low: pd.Series, close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Average True Range normalized by close."""
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    out = {}
-    for w in windows:
-        out[f"atr_{w}d"] = tr.rolling(w).mean() / close
-    return pd.DataFrame(out, index=close.index)
-
-
-# ---------------------------------------------------------------------------
-# 4. Technical indicator features
-# ---------------------------------------------------------------------------
-
-def _rsi(close: pd.Series, windows: list[int]) -> pd.DataFrame:
-    """Relative Strength Index."""
-    delta = close.diff()
-    out = {}
-    for w in windows:
-        gain = delta.clip(lower=0).rolling(w).mean()
-        loss = (-delta.clip(upper=0)).rolling(w).mean()
-        rs = gain / loss.replace(0, np.nan)
-        out[f"rsi_{w}"] = 100 - 100 / (1 + rs)
-    return pd.DataFrame(out, index=close.index)
-
-
-def _macd_hist(close: pd.Series) -> pd.DataFrame:
-    """Normalized MACD histogram."""
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    macd_line = ema12 - ema26
-    signal_line = macd_line.ewm(span=9, adjust=False).mean()
-    hist = macd_line - signal_line
-    # Normalize by rolling std for cross-stock comparability
-    hist_std = hist.rolling(60).std().replace(0, np.nan)
-    return pd.DataFrame({
-        "macd_hist_norm": hist / hist_std,
-    }, index=close.index)
-
-
-def _bollinger_pctb(close: pd.Series, window: int = 20) -> pd.DataFrame:
-    """Bollinger Band %B: position within bands [0=lower, 1=upper]."""
-    sma = close.rolling(window).mean()
-    std = close.rolling(window).std()
-    upper = sma + 2 * std
-    lower = sma - 2 * std
-    pctb = (close - lower) / (upper - lower).replace(0, np.nan)
-    return pd.DataFrame({"bb_pctb": pctb}, index=close.index)
-
-
-def _breakout_ratio(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 20) -> pd.DataFrame:
-    """Fraction of recent days where close was near high vs low of the window."""
-    rolling_high = high.rolling(window).max()
-    rolling_low = low.rolling(window).min()
-    rng = (rolling_high - rolling_low).replace(0, np.nan)
-    position = (close - rolling_low) / rng
-    return pd.DataFrame({"channel_position": position}, index=close.index)
 
 
 # ---------------------------------------------------------------------------
 # Main feature computation
 # ---------------------------------------------------------------------------
 
-RETURN_WINDOWS = [5, 10, 20, 60, 120]
-MA_WINDOWS = [5, 10, 20, 60, 120]
-VOL_RATIO_WINDOWS = [5, 10, 20]
-RVOL_WINDOWS = [5, 10, 20, 60]
-RANGE_WINDOWS = [5, 20]
-ATR_WINDOWS = [14, 20]
-RSI_WINDOWS = [5, 14]
-
-
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute all time-series features for a single stock.
+    """Compute all features for a single stock.
 
     Args:
         df: DataFrame with columns [open, high, low, close, volume], indexed by date.
 
     Returns:
-        DataFrame with ~50 feature columns, same date index.
+        DataFrame with ~18 feature columns, same date index.
     """
     close = df["close"]
     high = df["high"]
-    low = df["low"]
-    volume = df["volume"]
 
     parts = [
-        # Price momentum (~15)
-        _returns(close, RETURN_WINDOWS),
-        _ma_deviation(close, MA_WINDOWS),
-        _high_low_distance(close, high, low),
-        _momentum_acceleration(close),
-
-        # Volume (~8)
-        _volume_ratio(volume, VOL_RATIO_WINDOWS),
-        _volume_trend(volume),
-        _price_volume_divergence(close, volume),
-
-        # Volatility (~10)
-        _realized_vol(close, RVOL_WINDOWS),
-        _vol_change(close),
-        _intraday_range(high, low, close, RANGE_WINDOWS),
-        _atr(high, low, close, ATR_WINDOWS),
-
-        # Technical (~6)
-        _rsi(close, RSI_WINDOWS),
-        _macd_hist(close),
-        _bollinger_pctb(close),
-        _breakout_ratio(high, low, close),
+        _basic_momentum(close),
+        _skip_momentum(close),
+        _path_quality(close, high),
+        _risk_adjusted_momentum(close),
     ]
 
-    features = pd.concat(parts, axis=1)
-    return features
+    return pd.concat(parts, axis=1)
 
 
 def compute_all_features(panel: pd.DataFrame) -> pd.DataFrame:
@@ -270,7 +200,8 @@ def cross_sectional_rank(features: pd.DataFrame) -> pd.DataFrame:
     """Transform all features to cross-sectional percentile ranks [0, 1].
 
     For each date, ranks all stocks on each feature. This removes scale
-    differences between features and limits the impact of outliers.
+    differences across time and limits outlier impact. For tree models,
+    rank preserves all ordinal information (identical split points).
 
     Args:
         features: MultiIndex (date, ticker) DataFrame with feature columns.
@@ -282,13 +213,15 @@ def cross_sectional_rank(features: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_feature_names() -> list[str]:
-    """Return the list of feature column names (for reference)."""
-    # Generate from a dummy stock to get exact column names
+    """Return the list of feature column names."""
     dummy = pd.DataFrame({
-        "open": np.ones(300),
-        "high": np.ones(300) * 1.01,
-        "low": np.ones(300) * 0.99,
-        "close": np.ones(300),
-        "volume": np.ones(300) * 1e6,
+        "open": np.random.randn(300).cumsum() + 100,
+        "high": np.random.randn(300).cumsum() + 101,
+        "low": np.random.randn(300).cumsum() + 99,
+        "close": np.random.randn(300).cumsum() + 100,
+        "volume": np.abs(np.random.randn(300)) * 1e6,
     })
+    # Ensure high >= close >= low for realistic data
+    dummy["high"] = dummy[["open", "high", "close"]].max(axis=1)
+    dummy["low"] = dummy[["open", "low", "close"]].min(axis=1)
     return compute_features(dummy).columns.tolist()
