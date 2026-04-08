@@ -29,6 +29,7 @@ DEFAULT_PARAMS = {
     "lambda_l2": 0.1,
     "min_child_samples": 100,
     "verbose": -1,
+    "device_type": "cpu",
 }
 
 

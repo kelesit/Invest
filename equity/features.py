@@ -1,11 +1,12 @@
 """Feature engineering for equity cross-sectional momentum.
 
-~18 features organized in 4 groups, each answering a distinct question:
+~25 features organized in 5 groups, each answering a distinct question:
 
 1. Basic momentum — 谁最近更强？ (5 features)
 2. Skip momentum — 去掉近期噪音后谁更强？ (3 features)
 3. Path quality — 动量是稳态趋势还是靠几根大阳线硬拉？ (6 features)
 4. Risk-adjusted momentum — 单位风险下谁更强？ (4 features)
+5. Volume-price interaction — 成交量确认还是背离了价格信号？ (7 features)
 
 Design principles:
 - Each feature maps to a testable hypothesis about future returns
@@ -147,6 +148,59 @@ def _risk_adjusted_momentum(close: pd.Series) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# 5. Volume-price interaction — 成交量确认还是背离了价格信号？
+#
+# 成交量是独立于价格的信息源。关键不是成交量本身的高低，
+# 而是成交量和价格变动的关系：
+# - 放量下跌后反转概率 vs 缩量下跌后反转概率完全不同
+# - 涨的时候放量 = 资金流入确认，涨的时候缩量 = 动量耗竭
+# 全部向量化实现，无 rolling().apply()。
+# ---------------------------------------------------------------------------
+
+def _volume_price_interaction(close: pd.Series, volume: pd.Series) -> pd.DataFrame:
+    """Volume-price interaction features."""
+    daily_ret = close.pct_change()
+    out = {}
+
+    # --- Abnormal volume: 近期成交量相对历史水平 ---
+    # 放量 = 信息到达，市场对该股票的关注度突然升高
+    vol_5 = volume.rolling(5).mean()
+    vol_20 = volume.rolling(20).mean()
+    vol_60 = volume.rolling(60).mean()
+    out["abnormal_vol_5d"] = vol_5 / vol_60.replace(0, np.nan)
+    out["abnormal_vol_20d"] = vol_20 / vol_60.replace(0, np.nan)
+
+    # --- Volume-weighted return: 高成交量日的收益权重更大 ---
+    # 放量日的价格变动包含更多信息（更多参与者达成共识）
+    # 如果放量日普遍是涨的 → 资金在流入
+    # 如果放量日普遍是跌的 → 资金在流出
+    for w in [20, 60]:
+        vw_ret = (daily_ret * volume).rolling(w).sum() / volume.rolling(w).sum().replace(0, np.nan)
+        out[f"vwap_ret_{w}d"] = vw_ret
+
+    # --- Up-volume ratio: 上涨日的成交量 / 下跌日的成交量 ---
+    # > 1 = 涨的时候比跌的时候更活跃，买方力量占优
+    # < 1 = 跌的时候成交量更大，卖方主导
+    up_vol = (volume * (daily_ret > 0)).rolling(20).sum()
+    down_vol = (volume * (daily_ret <= 0)).rolling(20).sum()
+    out["up_vol_ratio_20d"] = up_vol / down_vol.replace(0, np.nan)
+
+    # --- Reversal × volume interaction: 放量反转信号 ---
+    # 核心假说：放量下跌 → 恐慌性抛售 → 反转概率更高
+    #           缩量下跌 → 阴跌 → 可能继续跌
+    # ret_5d 本身 IC = -0.015（反转信号），乘以异常成交量后
+    # 应该能区分"值得反转的下跌"和"不值得的下跌"
+    out["reversal_vol_5d"] = close.pct_change(5) * (vol_5 / vol_60.replace(0, np.nan))
+
+    # --- Volume-price correlation: 量价同向还是背离 ---
+    # 正相关 = 涨放量跌缩量 = 趋势健康
+    # 负相关 = 涨缩量跌放量 = 趋势不健康，可能反转
+    out["vol_price_corr_20d"] = daily_ret.rolling(20).corr(volume)
+
+    return pd.DataFrame(out, index=close.index)
+
+
+# ---------------------------------------------------------------------------
 # Main feature computation
 # ---------------------------------------------------------------------------
 
@@ -161,12 +215,14 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     close = df["close"]
     high = df["high"]
+    volume = df["volume"]
 
     parts = [
         _basic_momentum(close),
         _skip_momentum(close),
         _path_quality(close, high),
         _risk_adjusted_momentum(close),
+        _volume_price_interaction(close, volume),
     ]
 
     return pd.concat(parts, axis=1)

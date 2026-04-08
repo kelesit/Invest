@@ -179,6 +179,101 @@ def plot_equity_curve(
     return fig
 
 
+def _split_windows(index: pd.Index, gap_days: int = 20) -> pd.Series:
+    """Assign each date to a contiguous OOS window based on calendar gaps."""
+    dates = pd.DatetimeIndex(index).sort_values()
+    window_id = dates.to_series().diff().dt.days.gt(gap_days).cumsum()
+    window_id.index = dates
+    window_id.name = "window"
+    return window_id
+
+
+def summarize_oos_windows(
+    backtest_results: pd.DataFrame,
+    benchmark_returns: pd.Series,
+    gap_days: int = 20,
+) -> pd.DataFrame:
+    """Summarize each contiguous OOS backtest window.
+
+    This is useful when CV predictions exist only in short test slices, so the
+    overall equity curve is a stitched view rather than one continuous live run.
+    """
+    aligned_benchmark = benchmark_returns.reindex(backtest_results.index).fillna(0)
+    window_id = _split_windows(backtest_results.index, gap_days=gap_days)
+
+    rows = []
+    for wid, dates in window_id.groupby(window_id):
+        date_index = pd.DatetimeIndex(dates.index)
+        strat_ret = backtest_results.loc[date_index, "portfolio_return"]
+        bench_ret = aligned_benchmark.loc[date_index]
+
+        strat_cum = (1 + strat_ret).cumprod()
+        bench_cum = (1 + bench_ret).cumprod()
+        strat_dd = strat_cum / strat_cum.cummax() - 1
+        bench_dd = bench_cum / bench_cum.cummax() - 1
+        turnover = backtest_results.loc[date_index, "turnover"]
+
+        rows.append({
+            "window": int(wid) + 1,
+            "start": date_index.min().date(),
+            "end": date_index.max().date(),
+            "trading_days": len(date_index),
+            "strategy_total_return": strat_cum.iloc[-1] - 1,
+            "benchmark_total_return": bench_cum.iloc[-1] - 1,
+            "excess_return": (strat_cum.iloc[-1] / bench_cum.iloc[-1]) - 1,
+            "strategy_max_drawdown": strat_dd.min(),
+            "benchmark_max_drawdown": bench_dd.min(),
+            "avg_turnover_on_rebalance": turnover[turnover > 0].mean(),
+            "rebalances": int((turnover > 0).sum()),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def plot_oos_window_equity_curves(
+    backtest_results: pd.DataFrame,
+    benchmark_returns: pd.Series,
+    title: str = "Strategy vs SPY by OOS Window",
+    gap_days: int = 20,
+) -> plt.Figure:
+    """Plot a separate normalized equity curve for each contiguous OOS window."""
+    aligned_benchmark = benchmark_returns.reindex(backtest_results.index).fillna(0)
+    window_id = _split_windows(backtest_results.index, gap_days=gap_days)
+    n_windows = int(window_id.max()) + 1
+
+    fig, axes = plt.subplots(
+        n_windows,
+        1,
+        figsize=(14, max(3, 2.6 * n_windows)),
+        sharex=False,
+        sharey=False,
+    )
+    if n_windows == 1:
+        axes = [axes]
+
+    for ax, (wid, dates) in zip(axes, window_id.groupby(window_id)):
+        date_index = pd.DatetimeIndex(dates.index)
+        strat_ret = backtest_results.loc[date_index, "portfolio_return"]
+        bench_ret = aligned_benchmark.loc[date_index]
+
+        strat_cum = (1 + strat_ret).cumprod()
+        bench_cum = (1 + bench_ret).cumprod()
+
+        ax.plot(date_index, strat_cum.values, label="Strategy", linewidth=1.5)
+        ax.plot(date_index, bench_cum.values, label="SPY", linewidth=1.5, alpha=0.7)
+        ax.set_ylabel("Norm. Cum Return")
+        ax.set_title(
+            f"Window {int(wid) + 1}: "
+            f"{date_index.min().date()} to {date_index.max().date()}"
+        )
+        ax.grid(True, alpha=0.3)
+
+    axes[0].legend(loc="upper left")
+    fig.suptitle(title)
+    plt.tight_layout(rect=(0, 0, 1, 0.98))
+    return fig
+
+
 def plot_ic_analysis(ic_series: pd.Series, title: str = "IC Analysis") -> plt.Figure:
     """Plot IC time series and distribution."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
