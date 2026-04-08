@@ -27,7 +27,7 @@ DEFAULT_PARAMS = {
     "bagging_freq": 5,
     "lambda_l1": 0.1,
     "lambda_l2": 0.1,
-    "min_child_samples": 100,
+    "min_child_samples": 20,
     "verbose": -1,
     "device_type": "cpu",
 }
