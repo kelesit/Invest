@@ -105,6 +105,36 @@ def make_labels(
     return labels["label"]
 
 
+def make_binary_up_labels(
+    panel: pd.DataFrame,
+    periods: int = 10,
+) -> pd.Series:
+    """Construct binary labels for whether a stock goes up over the next N days.
+
+    For each stock on each date:
+      label = 1 if forward_return_stock > 0 else 0
+
+    Missing forward returns at the tail remain NaN so callers can safely align
+    features/labels without leaking future information.
+
+    Args:
+        panel: MultiIndex (date, ticker) with at least a 'close' column.
+        periods: Forward return horizon in trading days.
+
+    Returns:
+        Series with MultiIndex (date, ticker), named 'label', containing
+        1.0 / 0.0 / NaN.
+    """
+    close = panel["close"].sort_index()
+    forward_returns = close.groupby(level="ticker").pct_change(periods)
+    forward_returns = forward_returns.groupby(level="ticker").shift(-periods)
+
+    labels = (forward_returns > 0).astype(float)
+    labels = labels.where(forward_returns.notna())
+    labels.name = "label"
+    return labels
+
+
 def rank_labels(labels: pd.Series) -> pd.Series:
     """Transform labels to cross-sectional percentile ranks [0, 1].
 
