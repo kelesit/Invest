@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
+    "catboost>=1.2.8",
     "databento>=0.74.0",
     "ipykernel>=7.2.0",
     "matplotlib>=3.10.8",
