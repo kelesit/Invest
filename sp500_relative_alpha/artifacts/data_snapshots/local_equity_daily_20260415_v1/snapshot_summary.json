@@ -1,0 +1,20 @@
+{
+  "all_files_have_required_ohlcv": true,
+  "benchmark_present": true,
+  "cache_dir": "/Users/hsy/Work/Invest/data/equity",
+  "created_at_utc": "2026-04-15T00:00:00+00:00",
+  "file_count": 504,
+  "max_duplicate_date_count": 0,
+  "raw_sample_end": "2026-03-31",
+  "raw_sample_start": "2015-01-02",
+  "required_columns": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume"
+  ],
+  "snapshot_id": "local_equity_daily_20260415_v1",
+  "snapshot_manifest_sha256": "7c410f9b2075e38a76d14017e556fc50a324e1b471966d8d0c7d3ea977753bf0",
+  "total_size_bytes": 68059330
+}
