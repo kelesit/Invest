@@ -110,7 +110,6 @@ final holdout 隔离必须满足：
 在以下内容实现并通过测试前，不允许执行 primary experiment：
 
 - model training harness
-- Rank IC metric harness
 - multiple-testing ledger execution
 - baseline / economic gate harness
 

@@ -155,8 +155,9 @@ def validate_canonical_daily_ohlcv(daily: pd.DataFrame) -> None:
     if (daily["shares_volume"] < 0).any():
         raise DailyDataLoadError("canonical daily OHLCV contains negative shares_volume")
 
-    invalid_range = (daily["high"] < daily[["open", "low", "close"]].max(axis=1)) | (
-        daily["low"] > daily[["open", "high", "close"]].min(axis=1)
+    range_tolerance = 1e-10
+    invalid_range = (daily["high"] + range_tolerance < daily[["open", "low", "close"]].max(axis=1)) | (
+        daily["low"] - range_tolerance > daily[["open", "high", "close"]].min(axis=1)
     )
     if invalid_range.any():
         preview = daily.loc[invalid_range, ["symbol", "date", "open", "high", "low", "close"]].head(10)

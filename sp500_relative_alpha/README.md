@@ -47,6 +47,12 @@
   v1 的 primary hypothesis family、holdout discipline 与研究信用边界
 - [docs/evaluation_harness_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/evaluation_harness_v1.md)
   research dataset、purged expanding walk-forward folds 与 label-window leakage tests
+- [docs/metric_harness_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/metric_harness_v1.md)
+  `OOS mean cross-sectional Rank IC`、HAC t-stat 与 block bootstrap CI 的实现协议
+- [docs/modeling_harness_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/modeling_harness_v1.md)
+  walk-forward model interface；`fit` 可看 train label，`predict` 只看 test features
+- [docs/multiple_testing_ledger_execution_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/multiple_testing_ledger_execution_v1.md)
+  `24` 个 primary cells、`BH-FDR q=10%` 与 research candidate gate 的执行协议
 - [docs/preregistration_template_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/preregistration_template_v1.md)
   正式实验前填写的预注册模板
 - [docs/preregistration_round1_sp500_proxy_v1.md](/Users/hsy/Work/Invest/sp500_relative_alpha/docs/preregistration_round1_sp500_proxy_v1.md)
@@ -73,6 +79,12 @@
   feature-label research sample builder；一行为 `symbol, signal_date, horizon`
 - [folds.py](/Users/hsy/Work/Invest/sp500_relative_alpha/folds.py)
   purged expanding walk-forward fold generator 与 label-window leakage validator
+- [metrics.py](/Users/hsy/Work/Invest/sp500_relative_alpha/metrics.py)
+  Rank IC metric harness；只消费预测分数与 label，不训练模型
+- [modeling.py](/Users/hsy/Work/Invest/sp500_relative_alpha/modeling.py)
+  minimal walk-forward prediction harness；当前只含 dummy / baseline predictors
+- [multiple_testing.py](/Users/hsy/Work/Invest/sp500_relative_alpha/multiple_testing.py)
+  primary family registry、Benjamini-Hochberg FDR 与 research candidate gate
 - [artifacts/data_snapshots/local_equity_daily_20260415_v1/snapshot_summary.json](/Users/hsy/Work/Invest/sp500_relative_alpha/artifacts/data_snapshots/local_equity_daily_20260415_v1/snapshot_summary.json)
   Round 1 冻结数据快照摘要
 
@@ -86,7 +98,7 @@
 
 ## 下一步
 
-1. 实现 Rank IC metric harness
-2. 实现 model training harness 的最小接口，但先只接 baseline / dummy model 做 plumbing test
-3. 接入 multiple-testing ledger execution
-4. 在 metric、training、ledger 自测完成前，不跑 primary experiment
+1. 实现 economic gate 的 top-25 long-only portfolio harness
+2. 做 end-to-end synthetic plumbing test：dataset -> folds -> dummy prediction -> Rank IC summary -> ledger gate
+3. 做 final pre-run checklist
+4. 在 economic gate、synthetic E2E、pre-run checklist 完成前，不跑 primary experiment
