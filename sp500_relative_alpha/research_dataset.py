@@ -7,10 +7,12 @@ import pandas as pd
 
 from .alpha101_features import compute_alpha101_feature_matrices, stack_alpha101_feature_matrices
 from .alpha101_ops import build_alpha101_input_matrices
+from .feature_transforms import TransformConfig, compute_feature_frame
 from .labels import (
     DEFAULT_HORIZONS,
     build_round1_benchmark_relative_open_to_open_labels,
 )
+from .ohlcv_features import compute_ohlcv_feature_matrices
 
 
 class ResearchDatasetError(RuntimeError):
@@ -126,6 +128,62 @@ def _prepare_labels(labels: pd.DataFrame, label_column: str) -> pd.DataFrame:
         preview = bad_alignment[["signal_date", "entry_date", "exit_date"]].head(5).to_dict("records")
         raise ResearchDatasetError(f"label date alignment is invalid; preview={preview}")
     return clean
+
+
+def build_v2_research_dataset(
+    daily_bars: pd.DataFrame,
+    *,
+    alpha_ids: Iterable[str] | None = None,
+    horizons: Iterable[int] = (20,),
+    transform_config: TransformConfig | None = None,
+    label_column: str = "benchmark_relative_open_to_open_return",
+) -> pd.DataFrame:
+    """Build the v2 feature-label dataset.
+
+    Feature pipeline:
+      1. OHLCV primitives (ret_Nd, intraday structure, volume)
+      2. Alpha101 outputs (prefixed with "alpha_")
+      3. Unified transform layer: identity + cs_rank + ts_zscore + ts_change
+         + second-order combinations
+      4. All output feature columns carry the "feat_" prefix.
+
+    Label: benchmark-relative open-to-open return at each requested horizon.
+    """
+    cfg = transform_config or TransformConfig()
+
+    # --- primitives ---
+    ohlcv_primitives = compute_ohlcv_feature_matrices(daily_bars)
+    alpha_inputs = build_alpha101_input_matrices(daily_bars)
+    alpha_primitives = {
+        f"alpha_{k}": v
+        for k, v in compute_alpha101_feature_matrices(alpha_inputs, alpha_ids=alpha_ids).items()
+    }
+    all_primitives = {**ohlcv_primitives, **alpha_primitives}
+
+    # --- transforms ---
+    features_flat = compute_feature_frame(all_primitives, cfg).rename(columns={"date": "signal_date"})
+    features_flat["signal_date"] = pd.to_datetime(features_flat["signal_date"])
+
+    # --- labels ---
+    labels = build_round1_benchmark_relative_open_to_open_labels(daily_bars, horizons=horizons)
+
+    # --- align ---
+    merged = labels.merge(features_flat, how="left", on=["signal_date", "symbol"], validate="many_to_one")
+    feature_cols = sorted(c for c in merged.columns if c.startswith(cfg.output_prefix))
+
+    ordered = [
+        "signal_date", "symbol", "horizon",
+        "entry_date", "exit_date",
+        label_column,
+        "asset_open_to_open_return",
+        "benchmark_open_to_open_return",
+        *feature_cols,
+    ]
+    present = [c for c in ordered if c in merged.columns]
+    remainder = [c for c in merged.columns if c not in present]
+    return merged[present + remainder].sort_values(
+        ["horizon", "signal_date", "symbol"], ignore_index=True
+    )
 
 
 def _feature_columns(frame: pd.DataFrame) -> list[str]:

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import numpy as np
 import pandas as pd
 
 from .folds import WalkForwardFold, fold_period_mask
@@ -32,6 +33,7 @@ class WalkForwardPredictionConfig:
     score_column: str = "score"
     feature_prefix: str = "alpha_"
     metadata_columns: tuple[str, ...] = ("signal_date", "symbol", "horizon")
+    n_top_features: int | None = None  # per-fold IC selection; None = use all
 
 
 class ConstantPredictor:
@@ -118,10 +120,19 @@ def run_walk_forward_predictions(
             raise ModelHarnessError(f"{fold.fold_id} has empty train or test samples")
         _validate_fold_order(train_samples, test_samples, fold.fold_id)
 
+        if prediction_config.n_top_features is not None:
+            fold_features = _select_top_features_by_ic(
+                train_samples, feature_columns,
+                prediction_config.label_column,
+                prediction_config.n_top_features,
+            )
+        else:
+            fold_features = feature_columns
+
         predictor = predictor_factory()
-        predictor.fit(train_samples, feature_columns, prediction_config.label_column)
-        inference_samples = _build_inference_samples(test_samples, feature_columns, prediction_config.metadata_columns)
-        scores = predictor.predict(inference_samples, feature_columns)
+        predictor.fit(train_samples, fold_features, prediction_config.label_column)
+        inference_samples = _build_inference_samples(test_samples, fold_features, prediction_config.metadata_columns)
+        scores = predictor.predict(inference_samples, fold_features)
         score_series = _coerce_score_series(scores, test_samples.index, fold.fold_id, prediction_config.score_column)
 
         predictions = test_samples.copy()
@@ -135,6 +146,65 @@ def run_walk_forward_predictions(
         ["horizon", "fold_id", "signal_date", "symbol"],
         ignore_index=True,
     )
+
+
+def _select_top_features_by_ic(
+    train: pd.DataFrame,
+    feature_cols: tuple[str, ...],
+    label_col: str,
+    n_top: int,
+) -> tuple[str, ...]:
+    """Return the top n_top features ranked by |mean cross-sectional Pearson IC| on training data.
+
+    Loops over date groups (O(n_dates) Python iters), but each iter is a fully vectorized
+    matmul over all features. Feature NaN is replaced with cross-sectional mean (contributes
+    zero after centering, neutral for correlation).
+    """
+    n_top = min(n_top, len(feature_cols))
+    train = train[train[label_col].notna()].sort_values(["signal_date", "symbol"])
+
+    dates = train["signal_date"].to_numpy()
+    feat_arr = train[list(feature_cols)].to_numpy(dtype=np.float64)
+    label_arr = train[label_col].to_numpy(dtype=np.float64)
+
+    _, date_starts = np.unique(dates, return_index=True)
+    date_ends = np.append(date_starts[1:], len(dates))
+
+    n_feat = len(feature_cols)
+    ic_sum = np.zeros(n_feat)
+    ic_cnt = np.zeros(n_feat, dtype=np.int32)
+
+    for s, e in zip(date_starts, date_ends):
+        lg = label_arr[s:e]
+        fg = feat_arr[s:e]
+
+        if (~np.isfinite(lg)).all() or (e - s) < 5:
+            continue
+
+        fv = np.isfinite(fg)
+        col_cnt = fv.sum(axis=0).astype(np.float64)
+        col_mean = np.where(col_cnt > 0, np.where(fv, fg, 0.0).sum(axis=0) / np.maximum(col_cnt, 1), 0.0)
+        fg_c = np.where(fv, fg - col_mean, 0.0)    # NaN → 0 after centering
+
+        lg_c = lg - lg.mean()
+
+        num   = fg_c.T @ lg_c                       # (n_feat,)
+        var_f = (fg_c ** 2).sum(axis=0)
+        var_l = float((lg_c ** 2).sum())
+
+        if var_l <= 0:
+            continue
+
+        with np.errstate(invalid="ignore", divide="ignore"):
+            ic = np.where(var_f > 0, num / np.sqrt(var_f * var_l), np.nan)
+
+        has = np.isfinite(ic)
+        ic_sum += np.where(has, ic, 0.0)
+        ic_cnt += has.astype(np.int32)
+
+    mean_ic = ic_sum / np.maximum(ic_cnt, 1)
+    top_idx = np.argsort(-np.abs(mean_ic))[:n_top]
+    return tuple(np.array(list(feature_cols))[top_idx])
 
 
 def _validate_prediction_inputs(

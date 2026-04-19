@@ -5,6 +5,7 @@ from math import floor
 
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 class Alpha101OperatorError(RuntimeError):
@@ -105,7 +106,7 @@ def ts_sum(x: pd.DataFrame, window: float) -> pd.DataFrame:
 
 def ts_product(x: pd.DataFrame, window: float) -> pd.DataFrame:
     width = _window(window)
-    return x.rolling(width, min_periods=width).apply(np.prod, raw=True)
+    return _wrap_numpy(x, _np_ts_product, width)
 
 
 def ts_stddev(x: pd.DataFrame, window: float) -> pd.DataFrame:
@@ -125,21 +126,19 @@ def ts_max(x: pd.DataFrame, window: float) -> pd.DataFrame:
 
 def ts_rank(x: pd.DataFrame, window: float) -> pd.DataFrame:
     width = _window(window)
-    return x.rolling(width, min_periods=width).apply(_last_rank_pct, raw=True)
+    return _wrap_numpy(x, _np_ts_rank, width)
 
 
 def ts_argmax(x: pd.DataFrame, window: float) -> pd.DataFrame:
     """1-based position of the max inside the rolling window, oldest observation = 1."""
-
     width = _window(window)
-    return x.rolling(width, min_periods=width).apply(_argmax_1based, raw=True)
+    return _wrap_numpy(x, _np_ts_argmax, width)
 
 
 def ts_argmin(x: pd.DataFrame, window: float) -> pd.DataFrame:
     """1-based position of the min inside the rolling window, oldest observation = 1."""
-
     width = _window(window)
-    return x.rolling(width, min_periods=width).apply(_argmin_1based, raw=True)
+    return _wrap_numpy(x, _np_ts_argmin, width)
 
 
 def correlation(x: pd.DataFrame, y: pd.DataFrame, window: float) -> pd.DataFrame:
@@ -156,9 +155,7 @@ def covariance(x: pd.DataFrame, y: pd.DataFrame, window: float) -> pd.DataFrame:
 
 def decay_linear(x: pd.DataFrame, window: float) -> pd.DataFrame:
     width = _window(window)
-    weights = np.arange(1, width + 1, dtype=float)
-    weights = weights / weights.sum()
-    return x.rolling(width, min_periods=width).apply(lambda values: float(np.dot(values, weights)), raw=True)
+    return _wrap_numpy(x, _np_decay_linear, width)
 
 
 def scale(x: pd.DataFrame, a: float = 1.0) -> pd.DataFrame:
@@ -218,3 +215,81 @@ def _argmin_1based(values: np.ndarray) -> float:
     if np.isnan(values).any():
         return np.nan
     return float(np.argmin(values) + 1)
+
+
+# ---------------------------------------------------------------------------
+# Vectorized numpy implementations of slow rolling operators
+# ---------------------------------------------------------------------------
+# Each function loops over dates (O(n_dates) iterations) but vectorises fully
+# across the symbol axis, replacing O(n_dates × n_symbols) Python function
+# calls with O(n_dates) calls to numpy C-level routines.
+
+def _wrap_numpy(
+    x: pd.DataFrame,
+    fn,
+    width: int,
+) -> pd.DataFrame:
+    arr = x.to_numpy(dtype=float)
+    result = fn(arr, width)
+    return pd.DataFrame(result, index=x.index, columns=x.columns)
+
+
+def _np_ts_rank(arr: np.ndarray, window: int) -> np.ndarray:
+    n, m = arr.shape
+    out = np.full((n, m), np.nan)
+    wins = sliding_window_view(arr, window, axis=0)   # (n-w+1, m, window)
+    has_nan = np.isnan(wins).any(axis=-1)
+    last = wins[:, :, -1:]
+    n_less  = (wins < last).sum(axis=-1).astype(float)
+    n_equal = (wins == last).sum(axis=-1).astype(float)
+    ranks = (n_less + (n_equal + 1.0) / 2.0) / window
+    ranks[has_nan] = np.nan
+    out[window - 1:] = ranks
+    return out
+
+
+def _np_ts_argmax(arr: np.ndarray, window: int) -> np.ndarray:
+    n, m = arr.shape
+    out = np.full((n, m), np.nan)
+    wins = sliding_window_view(arr, window, axis=0)
+    has_nan = np.isnan(wins).any(axis=-1)
+    idx = np.argmax(wins, axis=-1).astype(float) + 1.0
+    idx[has_nan] = np.nan
+    out[window - 1:] = idx
+    return out
+
+
+def _np_ts_argmin(arr: np.ndarray, window: int) -> np.ndarray:
+    n, m = arr.shape
+    out = np.full((n, m), np.nan)
+    wins = sliding_window_view(arr, window, axis=0)
+    has_nan = np.isnan(wins).any(axis=-1)
+    idx = np.argmin(wins, axis=-1).astype(float) + 1.0
+    idx[has_nan] = np.nan
+    out[window - 1:] = idx
+    return out
+
+
+def _np_decay_linear(arr: np.ndarray, window: int) -> np.ndarray:
+    weights = np.arange(1, window + 1, dtype=float)
+    weights /= weights.sum()
+    n, m = arr.shape
+    out = np.full((n, m), np.nan)
+    wins = sliding_window_view(arr, window, axis=0)   # (n-w+1, m, window)
+    has_nan = np.isnan(wins).any(axis=-1)
+    with np.errstate(invalid="ignore"):
+        result = wins @ weights                        # (n-w+1, m); NaN propagates, masked below
+    result[has_nan] = np.nan
+    out[window - 1:] = result
+    return out
+
+
+def _np_ts_product(arr: np.ndarray, window: int) -> np.ndarray:
+    n, m = arr.shape
+    out = np.full((n, m), np.nan)
+    wins = sliding_window_view(arr, window, axis=0)
+    has_nan = np.isnan(wins).any(axis=-1)
+    result = np.prod(wins, axis=-1).astype(float)
+    result[has_nan] = np.nan
+    out[window - 1:] = result
+    return out

@@ -34,6 +34,7 @@ class WalkForwardFoldConfig:
     min_training_days: int = ROUND1_MIN_TRAINING_DAYS
     test_block_days: int = ROUND1_TEST_BLOCK_DAYS
     purge_gap_days: int = ROUND1_PURGE_GAP_DAYS
+    rolling_window_days: int | None = None  # None = expanding; int = rolling
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,17 @@ class WalkForwardFold:
     n_train_signal_dates: int
     n_gap_signal_dates: int
     n_test_signal_dates: int
+
+
+def build_round1_rolling_walk_forward_folds(
+    signal_dates: Iterable[object],
+    rolling_window_days: int = 2 * 252,
+) -> tuple[WalkForwardFold, ...]:
+    """Build Round 1 walk-forward folds with a rolling training window."""
+    return build_purged_expanding_walk_forward_folds(
+        signal_dates,
+        WalkForwardFoldConfig(rolling_window_days=rolling_window_days),
+    )
 
 
 def build_round1_walk_forward_folds(signal_dates: Iterable[object]) -> tuple[WalkForwardFold, ...]:
@@ -96,16 +108,21 @@ def build_purged_expanding_walk_forward_folds(
         gap_end_pos = test_start_pos - 1
         test_end_pos = test_start_pos + fold_config.test_block_days - 1
 
+        if fold_config.rolling_window_days is not None:
+            train_start_pos = max(0, train_end_pos - fold_config.rolling_window_days + 1)
+        else:
+            train_start_pos = 0
+
         folds.append(
             WalkForwardFold(
                 fold_id=f"fold_{len(folds) + 1:03d}",
-                train_start=research_calendar[0],
+                train_start=research_calendar[train_start_pos],
                 train_end=research_calendar[train_end_pos],
                 gap_start=research_calendar[gap_start_pos],
                 gap_end=research_calendar[gap_end_pos],
                 test_start=research_calendar[test_start_pos],
                 test_end=research_calendar[test_end_pos],
-                n_train_signal_dates=train_end_pos + 1,
+                n_train_signal_dates=train_end_pos - train_start_pos + 1,
                 n_gap_signal_dates=fold_config.purge_gap_days,
                 n_test_signal_dates=fold_config.test_block_days,
             )
